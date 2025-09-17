@@ -19,6 +19,7 @@ class Video(Base):
     format = Column(String, nullable=True)
     mime_type = Column(String, nullable=False)
     upload_time = Column(DateTime(timezone=True), server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
     processed_videos = relationship("ProcessedVideo", back_populates="original_video")
     jobs = relationship("Job", back_populates="video")
@@ -39,6 +40,7 @@ class ProcessedVideo(Base):
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
     original_video = relationship("Video", back_populates="processed_videos")
 

@@ -6,6 +6,4 @@ from .video import (
     OverlayRequest,
     WatermarkRequest,
     QualityRequest,
-    JobResponse,
-    JobResult,
 )

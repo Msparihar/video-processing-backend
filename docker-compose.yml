@@ -1,55 +1,49 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: video_processing
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+  rabbitmq:
+    image: rabbitmq:3-management
     ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
 
-  api:
+  web:
     build: .
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./data:/data
+      - ./app:/app/app   # allow live edit from host
+      - ./ddialog.db:/app/ddialog.db
+      - ./uploads:/app/uploads
+      - ./processed:/app/processed
     ports:
       - "8000:8000"
-    volumes:
-      - ./:/app
-      - ./uploads:/app/uploads
-      - ./processed:/app/processed
-      - ./assets:/app/assets
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/video_processing
-      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
     depends_on:
-      - postgres
+      - rabbitmq
       - redis
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  celery:
+  worker:
     build: .
+    command: uv run celery -A app.celery_app worker --loglevel=info --concurrency=1 -Q default
     volumes:
-      - ./:/app
+      - ./data:/data
+      - ./app:/app/app
+      - ./ddialog.db:/app/ddialog.db
       - ./uploads:/app/uploads
       - ./processed:/app/processed
-      - ./assets:/app/assets
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/video_processing
-      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
     depends_on:
-      - postgres
+      - rabbitmq
       - redis
-    command: celery -A app.tasks.celery_app worker --loglevel=info
-
-volumes:
-  postgres_data:
-
-
+      - web

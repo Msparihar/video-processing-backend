@@ -4,12 +4,35 @@ import os
 from typing import Dict, Any, Optional
 from app.config import settings
 import logging
+from app.utils.ffmpeg_runner import run_ffmpeg
 
 
 logger = logging.getLogger(__name__)
 
 
 class FFmpegService:
+    @staticmethod
+    def _sanitize_drawtext_text(text: str) -> str:
+        # Escape characters significant to ffmpeg drawtext parsing
+        # Order matters: backslash first
+        sanitized = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'").replace("\n", "\\n")
+        return sanitized
+
+    @staticmethod
+    def _validate_time_range(start_time: float, end_time: Optional[float]) -> None:
+        if start_time < 0:
+            raise ValueError("start_time must be >= 0")
+        if end_time is not None:
+            if end_time <= 0:
+                raise ValueError("end_time must be > 0 when provided")
+            if end_time <= start_time:
+                raise ValueError("end_time must be greater than start_time")
+
+    @staticmethod
+    def _validate_position(position_x: int, position_y: int) -> None:
+        if position_x < 0 or position_y < 0:
+            raise ValueError("position_x and position_y must be >= 0")
+
     @staticmethod
     def get_video_info(file_path: str) -> Dict[str, Any]:
         try:
@@ -24,8 +47,8 @@ class FFmpegService:
                 file_path,
             ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            data = json.loads(result.stdout)
+            result = run_ffmpeg(cmd, timeout_s=20, check=True)
+            data = json.loads(result["stdout"])
 
             video_stream = next((s for s in data["streams"] if s["codec_type"] == "video"), None)
             if not video_stream:
@@ -46,6 +69,7 @@ class FFmpegService:
     @staticmethod
     def trim_video(input_path: str, output_path: str, start_time: float, end_time: float) -> bool:
         try:
+            FFmpegService._validate_time_range(start_time, end_time)
             duration = end_time - start_time
             cmd = [
                 settings.ffmpeg_path,
@@ -63,7 +87,7 @@ class FFmpegService:
                 "-y",
             ]
 
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            run_ffmpeg(cmd, timeout_s=120, check=True)
             return os.path.exists(output_path)
         except Exception as e:
             logger.error(f"Error trimming video: {e}")
@@ -83,6 +107,10 @@ class FFmpegService:
         language: str = "en",
     ) -> bool:
         try:
+            FFmpegService._validate_position(position_x, position_y)
+            FFmpegService._validate_time_range(start_time, end_time)
+            if font_size <= 0:
+                raise ValueError("font_size must be > 0")
             font_paths = {
                 "en": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
                 "hi": "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
@@ -91,8 +119,9 @@ class FFmpegService:
             }
             font_path = font_paths.get(language, font_paths["en"])
 
+            safe_text = FFmpegService._sanitize_drawtext_text(text)
             drawtext = (
-                f"drawtext=text='{text}':x={position_x}:y={position_y}:fontsize={font_size}:"
+                f"drawtext=text='{safe_text}':x={position_x}:y={position_y}:fontsize={font_size}:"
                 f"fontcolor={font_color}:fontfile={font_path}"
             )
             if start_time > 0 or end_time:
@@ -111,7 +140,7 @@ class FFmpegService:
                 "-y",
             ]
 
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            run_ffmpeg(cmd, timeout_s=300, check=True)
             return os.path.exists(output_path)
         except Exception as e:
             logger.error(f"Error adding text overlay: {e}")
@@ -128,6 +157,8 @@ class FFmpegService:
         end_time: Optional[float] = None,
     ) -> bool:
         try:
+            FFmpegService._validate_position(position_x, position_y)
+            FFmpegService._validate_time_range(start_time, end_time)
             overlay_filter = f"[1:v]scale=-1:-1[overlay]; [0:v][overlay]overlay={position_x}:{position_y}"
             if start_time > 0 or end_time:
                 enable_condition = f"enable='between(t,{start_time},{end_time or 'inf'})'"
@@ -147,7 +178,7 @@ class FFmpegService:
                 "-y",
             ]
 
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            run_ffmpeg(cmd, timeout_s=300, check=True)
             return os.path.exists(output_path)
         except Exception as e:
             logger.error(f"Error adding image overlay: {e}")
@@ -162,6 +193,8 @@ class FFmpegService:
         opacity: float = 0.8,
     ) -> bool:
         try:
+            if not (0.0 <= opacity <= 1.0):
+                raise ValueError("opacity must be between 0.0 and 1.0")
             positions = {
                 "top-left": "10:10",
                 "top-right": "main_w-overlay_w-10:10",
@@ -188,7 +221,7 @@ class FFmpegService:
                 "-y",
             ]
 
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            run_ffmpeg(cmd, timeout_s=300, check=True)
             return os.path.exists(output_path)
         except Exception as e:
             logger.error(f"Error adding watermark: {e}")

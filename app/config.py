@@ -4,7 +4,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Database
-    database_url: str
+    database_url: str = "sqlite:///ddialog.db"
 
     # File storage
     upload_dir: str = "uploads"
@@ -20,9 +20,16 @@ class Settings(BaseSettings):
 
     # Processing
     max_file_size: int = 500 * 1024 * 1024  # 500MB
-    allowed_video_types: list = ["video/mp4", "video/avi", "video/mov", "video/wmv"]
+    allowed_video_types: list = [
+        "video/mp4",
+        "video/avi",
+        "video/mov",
+        "video/wmv",
+        "video/x-matroska",  # mkv
+        "video/webm",
+    ]
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 
 settings = Settings()

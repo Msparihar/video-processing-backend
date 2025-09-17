@@ -1,22 +1,30 @@
-import os
-
-print("[router:processing] module import start")
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
+import os
+from datetime import datetime
+from app.models.video import ProcessedVideo
 
 from app.api.deps import get_db
 from app.services.video_service import VideoService
-from app.schemas.video import TrimRequest, OverlayRequest, WatermarkRequest, QualityRequest, ProcessedVideoResponse
+from app.schemas.video import (
+    TrimRequest,
+    OverlayRequest,
+    WatermarkRequest,
+    QualityRequest,
+    ProcessedVideoResponse,
+    CeleryOverlayRequest,
+)
 from app.config import settings
+from app.tasks.echo import echo
+from app.tasks.video import trim_video_task, overlay_video_task
 
-
-print("[router:processing] creating APIRouter")
 router = APIRouter()
 
 
 @router.post("/trim", response_model=ProcessedVideoResponse)
 def trim_video(request: TrimRequest, db: Session = Depends(get_db)):
-    print("[router:processing] /trim handler invoked")
     video = VideoService.get_video_by_id(db, request.video_id)
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
@@ -27,7 +35,8 @@ def trim_video(request: TrimRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"End time cannot exceed video duration ({video.duration}s)"
         )
 
-    output_filename = f"trimmed_{os.path.basename(video.filename)}"
+    iso_timestamp = datetime.utcnow().isoformat().replace(":", "-") + "Z"
+    output_filename = f"{iso_timestamp}_trimmed_{os.path.basename(video.filename)}"
     output_path = os.path.join(settings.processed_dir, output_filename)
     os.makedirs(settings.processed_dir, exist_ok=True)
 
@@ -41,7 +50,6 @@ def trim_video(request: TrimRequest, db: Session = Depends(get_db)):
 
 @router.post("/overlay", response_model=ProcessedVideoResponse)
 def add_overlay(request: OverlayRequest, db: Session = Depends(get_db)):
-    print("[router:processing] /overlay handler invoked")
     video = VideoService.get_video_by_id(db, request.video_id)
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
@@ -56,7 +64,8 @@ def add_overlay(request: OverlayRequest, db: Session = Depends(get_db)):
         overlay_content = request.content
 
     os.makedirs(settings.processed_dir, exist_ok=True)
-    output_filename = f"overlay_{os.path.basename(video.filename)}"
+    iso_timestamp = datetime.utcnow().isoformat().replace(":", "-") + "Z"
+    output_filename = f"{iso_timestamp}_overlay_{os.path.basename(video.filename)}"
     output_path = os.path.join(settings.processed_dir, output_filename)
 
     success = VideoService.overlay_and_record(
@@ -82,7 +91,6 @@ def add_overlay(request: OverlayRequest, db: Session = Depends(get_db)):
 
 @router.post("/watermark", response_model=ProcessedVideoResponse)
 def add_watermark(request: WatermarkRequest, db: Session = Depends(get_db)):
-    print("[router:processing] /watermark handler invoked")
     video = VideoService.get_video_by_id(db, request.video_id)
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
@@ -94,7 +102,8 @@ def add_watermark(request: WatermarkRequest, db: Session = Depends(get_db)):
         )
 
     os.makedirs(settings.processed_dir, exist_ok=True)
-    output_filename = f"watermarked_{os.path.basename(video.filename)}"
+    iso_timestamp = datetime.utcnow().isoformat().replace(":", "-") + "Z"
+    output_filename = f"{iso_timestamp}_watermarked_{os.path.basename(video.filename)}"
     output_path = os.path.join(settings.processed_dir, output_filename)
 
     success = VideoService.watermark_and_record(
@@ -114,7 +123,6 @@ def add_watermark(request: WatermarkRequest, db: Session = Depends(get_db)):
 
 @router.post("/quality", response_model=ProcessedVideoResponse)
 def convert_quality(request: QualityRequest, db: Session = Depends(get_db)):
-    print("[router:processing] /quality handler invoked")
     video = VideoService.get_video_by_id(db, request.video_id)
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
@@ -130,7 +138,8 @@ def convert_quality(request: QualityRequest, db: Session = Depends(get_db)):
     target_quality = request.qualities[0]
 
     os.makedirs(settings.processed_dir, exist_ok=True)
-    output_filename = f"{target_quality}_{os.path.basename(video.filename)}"
+    iso_timestamp = datetime.utcnow().isoformat().replace(":", "-") + "Z"
+    output_filename = f"{iso_timestamp}_{target_quality}_{os.path.basename(video.filename)}"
     output_path = os.path.join(settings.processed_dir, output_filename)
 
     success = VideoService.quality_and_record(db, video, output_path, target_quality)
@@ -143,4 +152,71 @@ def convert_quality(request: QualityRequest, db: Session = Depends(get_db)):
     return ProcessedVideoResponse.model_validate(processed, from_attributes=True)
 
 
-print("[router:processing] module import complete")
+# ---------------------- Celery-backed sample endpoints ----------------------
+
+
+class CeleryEchoRequest(BaseModel):
+    message: str
+
+
+@router.post("/celery/echo", tags=["celery"])
+def celery_echo(req: CeleryEchoRequest):
+    task = echo.delay(req.message)
+    return {"task_id": task.id}
+
+
+class CeleryTrimRequest(BaseModel):
+    video_id: str
+    start_time: float
+    end_time: float
+
+
+@router.post("/celery/trim", tags=["celery"])
+def celery_trim(req: CeleryTrimRequest):
+    task = trim_video_task.delay(req.video_id, req.start_time, req.end_time)
+    return {"task_id": task.id}
+
+
+@router.get("/celery/status/{task_id}", tags=["celery"])
+def celery_status(task_id: str):
+    from celery.result import AsyncResult
+    from app.celery_app import celery_app
+
+    res = AsyncResult(task_id, app=celery_app)
+    payload = {
+        "task_id": task_id,
+        "state": res.state,
+        "successful": res.successful() if res.state in {"SUCCESS", "FAILURE"} else None,
+        "result": res.result if res.ready() else None,
+    }
+    return payload
+
+
+@router.post("/celery/overlay", tags=["celery"])
+def celery_overlay(req: CeleryOverlayRequest):
+    task = overlay_video_task.delay(
+        req.video_id,
+        req.overlay_type,
+        req.content,
+        req.position_x,
+        req.position_y,
+        req.start_time,
+        req.end_time,
+        req.font_size,
+        req.font_color or "white",
+        req.language or "en",
+    )
+    return {"task_id": task.id}
+
+
+@router.get("/processed/{processed_id}/download")
+def download_processed(processed_id: str, db: Session = Depends(get_db)):
+    processed = db.query(ProcessedVideo).filter(ProcessedVideo.id == processed_id).first()
+    if not processed or not os.path.exists(processed.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processed video not found")
+    return FileResponse(
+        path=processed.file_path,
+        filename=processed.filename,
+        media_type='application/octet-stream',
+        headers={"Content-Disposition": f"attachment; filename={processed.filename}"}
+    )

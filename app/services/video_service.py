@@ -1,6 +1,7 @@
 import os
 import shutil
 import uuid
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 from fastapi import UploadFile
@@ -19,7 +20,8 @@ class VideoService:
     @staticmethod
     def save_upload_file(upload_file: UploadFile) -> Tuple[str, str]:
         file_extension = os.path.splitext(upload_file.filename)[1]
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        iso_timestamp = datetime.utcnow().isoformat().replace(":", "-") + "Z"
+        unique_filename = f"{iso_timestamp}_{uuid.uuid4()}{file_extension}"
         file_path = os.path.join(settings.upload_dir, unique_filename)
 
         os.makedirs(settings.upload_dir, exist_ok=True)
@@ -51,6 +53,7 @@ class VideoService:
             video_info = {}
 
         file_size = os.path.getsize(file_path)
+        now = datetime.now(timezone.utc)
         video = Video(
             filename=filename,
             original_filename=upload_file.filename,
@@ -61,6 +64,8 @@ class VideoService:
             height=video_info.get("height"),
             format=video_info.get("format"),
             mime_type=mime_type,
+            upload_time=now,
+            timestamp=now,
         )
         db.add(video)
         db.commit()
@@ -122,6 +127,7 @@ class VideoService:
         processing_config: Optional[dict] = None,
         quality: Optional[str] = None,
     ) -> ProcessedVideo:
+        now = datetime.now(timezone.utc)
         processed_video = ProcessedVideo(
             original_video_id=video.id,
             filename=os.path.basename(output_path),
@@ -130,6 +136,8 @@ class VideoService:
             processing_type=processing_type,
             processing_config=processing_config or {},
             quality=quality,
+            created_at=now,
+            timestamp=now,
         )
         db.add(processed_video)
         db.commit()

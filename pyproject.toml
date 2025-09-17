@@ -19,5 +19,8 @@ dependencies = [
     "aiofiles>=23.2.0",
     "python-magic>=0.4.0",
     "pillow>=10.1.0",
+    "celery>=5.5.3",
+    "redis>=6.4.0",
+    "requests>=2.32.5",
 ]
 

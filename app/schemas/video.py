@@ -18,6 +18,7 @@ class VideoResponse(BaseModel):
     format: Optional[str] = None
     mime_type: str
     upload_time: datetime
+    timestamp: datetime
 
     class Config:
         from_attributes = True
@@ -61,6 +62,19 @@ class QualityRequest(BaseModel):
     qualities: List[str] = Field(default=["1080p", "720p", "480p"])
 
 
+class CeleryOverlayRequest(BaseModel):
+    video_id: str
+    overlay_type: str = Field(..., pattern=r"^(text|image|video)$")
+    content: str
+    position_x: int = Field(default=0, ge=0)
+    position_y: int = Field(default=0, ge=0)
+    start_time: float = Field(default=0.0, ge=0)
+    end_time: Optional[float] = Field(None, gt=0)
+    font_size: Optional[int] = Field(None, gt=0)
+    font_color: Optional[str] = None
+    language: Optional[str] = None
+
+
 class ProcessedVideoResponse(BaseModel):
     id: str
     original_video_id: str
@@ -70,6 +84,7 @@ class ProcessedVideoResponse(BaseModel):
     processing_type: str
     quality: Optional[str] = None
     created_at: datetime
+    timestamp: datetime
 
     class Config:
         from_attributes = True

@@ -1,4 +1,5 @@
 import os
+from fastapi.responses import FileResponse
 
 print("[router:upload] module import start")
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
@@ -64,6 +65,19 @@ def get_video(video_id: str, db: Session = Depends(get_db)):
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
     return VideoResponse.model_validate(video, from_attributes=True)
+
+
+@router.get("/videos/{video_id}/download")
+def download_video(video_id: str, db: Session = Depends(get_db)):
+    video = VideoService.get_video_by_id(db, video_id)
+    if not video or not os.path.exists(video.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    return FileResponse(
+        path=video.file_path,
+        filename=video.original_filename,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename={video.original_filename}"},
+    )
 
 
 print("[router:upload] module import complete")
