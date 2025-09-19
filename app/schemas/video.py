@@ -18,7 +18,7 @@ class VideoResponse(BaseModel):
     format: Optional[str] = None
     mime_type: str
     upload_time: datetime
-    timestamp: datetime
+    timestamp: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -84,7 +84,7 @@ class ProcessedVideoResponse(BaseModel):
     processing_type: str
     quality: Optional[str] = None
     created_at: datetime
-    timestamp: datetime
+    timestamp: Optional[datetime] = None
 
     class Config:
         from_attributes = True

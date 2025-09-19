@@ -4,7 +4,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "sqlite:///ddialog.db"
+    database_url: str = "postgresql://postgres:password@localhost:5432/video_processing"
 
     # File storage
     upload_dir: str = "uploads"
@@ -28,6 +28,13 @@ class Settings(BaseSettings):
         "video/x-matroska",  # mkv
         "video/webm",
     ]
+
+    # Celery
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/0"
+
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

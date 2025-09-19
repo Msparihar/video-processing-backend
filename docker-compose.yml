@@ -1,6 +1,22 @@
 version: "3.8"
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: video_processing
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   rabbitmq:
     image: rabbitmq:3-management
     ports:
@@ -9,11 +25,21 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 3
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   web:
     build: .
@@ -21,16 +47,23 @@ services:
     volumes:
       - ./data:/data
       - ./app:/app/app   # allow live edit from host
-      - ./ddialog.db:/app/ddialog.db
       - ./uploads:/app/uploads
       - ./processed:/app/processed
+      - ./assets:/app/assets
     ports:
       - "8000:8000"
-    env_file:
-      - .env
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/video_processing
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - rabbitmq
-      - redis
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   worker:
     build: .
@@ -38,12 +71,23 @@ services:
     volumes:
       - ./data:/data
       - ./app:/app/app
-      - ./ddialog.db:/app/ddialog.db
       - ./uploads:/app/uploads
       - ./processed:/app/processed
-    env_file:
-      - .env
+      - ./assets:/app/assets
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/video_processing
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - rabbitmq
-      - redis
-      - web
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+volumes:
+  postgres_data:
