@@ -16,6 +16,14 @@ This is a FastAPI-based backend for video processing using FFmpeg, with Celery f
   - POST /api/v1/celery/trim - Queue trim task.
   - POST /api/v1/celery/overlay - Queue overlay task.
   - GET /api/v1/celery/status/{task_id} - Poll task status.
+- **Video Streaming (NEW)**:
+  - POST /api/v1/videos/{video_id}/prepare-streaming - Prepare video for HLS streaming with multiple qualities.
+  - GET /api/v1/videos/{video_id}/streaming-info - Get streaming information and available variants.
+  - GET /api/v1/videos/{video_id}/master.m3u8 - Serve HLS master playlist.
+  - GET /api/v1/videos/{video_id}/stream/{quality}.m3u8 - Serve quality-specific HLS playlist.
+  - GET /api/v1/videos/{video_id}/stream/{quality}_{segment}.ts - Serve HLS video segments.
+  - POST /api/v1/videos/{video_id}/speed-variant - Create speed-adjusted video variants.
+  - GET /api/v1/player - Access the streaming player interface.
 - **Download APIs**:
   - GET /api/v1/videos/{video_id}/download - Download original video with attachment header.
   - GET /api/v1/processed/{processed_id}/download - Download processed video with attachment header.
@@ -23,6 +31,52 @@ This is a FastAPI-based backend for video processing using FFmpeg, with Celery f
 ## Timestamped Storage
 
 All uploaded and processed files now include an ISO8601 timestamp prefix in filenames (e.g., "2024-09-17T19-25-07Z") to ensure uniqueness and prevent overwrites. The DB stores the timestamp in a 'timestamp' field for metadata.
+
+## Video Streaming
+The application now supports adaptive bitrate streaming with the following features:
+
+### Streaming Features
+- **HLS (HTTP Live Streaming)**: Industry-standard streaming protocol
+- **Multi-quality Support**: Automatic generation of 360p, 480p, 720p, and 1080p variants
+- **Adaptive Bitrate**: Seamless quality switching based on network conditions
+- **Speed Control**: Support for variable playback speeds (0.5x to 2x)
+- **Real-time Streaming**: Low-latency streaming with pause/resume support
+
+### Streaming Workflow
+1. **Upload Video**: Upload your video file using the standard upload endpoint
+2. **Prepare Streaming**: Call the prepare-streaming endpoint to generate HLS variants
+3. **Access Player**: Use the built-in player at `/player` or integrate with your own player
+4. **Stream Content**: The player automatically handles quality switching and speed control
+
+### Streaming API Usage
+```bash
+# Prepare video for streaming
+curl -X POST "http://localhost:8000/api/v1/videos/{video_id}/prepare-streaming" \
+  -H "Content-Type: application/json" \
+  -d '{"qualities": ["360p", "480p", "720p", "1080p"]}'
+
+# Get streaming info
+curl "http://localhost:8000/api/v1/videos/{video_id}/streaming-info"
+
+# Create speed variant
+curl -X POST "http://localhost:8000/api/v1/videos/{video_id}/speed-variant" \
+  -H "Content-Type: application/json" \
+  -d '{"speed": 1.5, "quality": "720p"}'
+```
+
+### Player Integration
+Access the streaming player at `http://localhost:8000/player` and enter your video ID to start streaming. The player supports:
+- Quality switching (360p, 480p, 720p, 1080p)
+- Speed control (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2x)
+- Fullscreen playback
+- Responsive design
+
+### Streaming Setup Notes
+- Ensure FFmpeg is installed with HLS support
+- The streaming system creates multiple quality variants, so ensure adequate disk space
+- For production, consider using a CDN for better streaming performance
+- The player interface is available at `http://localhost:8000/player`
+- Test streaming with `uv run test_streaming.py`
 
 ## Quick Start
 

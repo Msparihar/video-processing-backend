@@ -2,6 +2,8 @@ import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+import os
 
 from app.config import settings
 from app.utils.ffmpeg_runner import run_ffmpeg
@@ -30,9 +32,20 @@ app.add_middleware(
 app.include_router(upload.router, prefix="/api/v1", tags=["upload"])
 app.include_router(processing.router, prefix="/api/v1", tags=["processing"])
 
+# Include streaming router
+try:
+    from app.api.endpoints.streaming import router as streaming_router
+    app.include_router(streaming_router, prefix="/api/v1", tags=["streaming"])
+    print("Streaming router loaded successfully")
+except ImportError as e:
+    print(f"Warning: Could not import streaming router: {e}")
+    import traceback
+    traceback.print_exc()
+
 
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 app.mount("/processed", StaticFiles(directory=settings.processed_dir), name="processed")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
@@ -52,6 +65,28 @@ def health_check():
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"status": "unhealthy", "error": str(exc)})
+
+
+@app.get("/player", response_class=HTMLResponse)
+def get_player():
+    """Serve the video streaming player"""
+    try:
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "player.html")
+        with open(template_path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Player template not found</h1>", status_code=404)
+
+
+@app.get("/library", response_class=HTMLResponse)
+def get_video_library():
+    """Serve the video library interface"""
+    try:
+        template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "video-library.html")
+        with open(template_path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Video library template not found</h1>", status_code=404)
 
 
 @app.on_event("startup")

@@ -1,7 +1,8 @@
 import subprocess
 import json
 import os
-from typing import Dict, Any, Optional
+import uuid
+from typing import Dict, Any, Optional, List
 from app.config import settings
 import logging
 from app.utils.ffmpeg_runner import run_ffmpeg
@@ -257,8 +258,273 @@ class FFmpegService:
                 "-y",
             ]
 
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            run_ffmpeg(cmd, timeout_s=300, check=True)
             return os.path.exists(output_path)
         except Exception as e:
             logger.error(f"Error converting quality: {e}")
+            raise
+
+    @staticmethod
+    def _create_single_quality_hls(input_path: str, output_dir: str, base_name: str, quality: str, settings_dict: dict) -> bool:
+        """
+        Create a single quality HLS variant
+        """
+        try:
+            # Calculate appropriate dimensions based on input video aspect ratio
+            input_info = FFmpegService.get_video_info(input_path)
+            if not input_info:
+                raise Exception("Could not get video info")
+
+            input_width = input_info.get('width', 1920)
+            input_height = input_info.get('height', 1080)
+
+            # Calculate target dimensions maintaining aspect ratio
+            target_width = settings_dict['width']
+            target_height = settings_dict['height']
+
+            # For portrait videos, adjust dimensions to maintain aspect ratio
+            if input_width < input_height:  # Portrait video
+                # Scale based on width, maintain aspect ratio
+                scale_factor = target_width / input_width
+                actual_height = int(input_height * scale_factor)
+                scale_filter = f"scale={target_width}:{actual_height}"
+            else:  # Landscape video
+                scale_filter = f"scale={target_width}:{target_height}"
+
+            cmd = [
+                settings.ffmpeg_path,
+                "-i", input_path,
+                "-vf", scale_filter,
+                "-c:v", "libx264",
+                "-b:v", settings_dict["bitrate"],
+                "-maxrate", settings_dict["bitrate"],
+                "-bufsize", f"{int(settings_dict['bitrate'].replace('k', '')) * 2}k",
+                "-preset", "medium",
+                "-g", "48",  # GOP size
+                "-sc_threshold", "0",
+                "-c:a", "aac",
+                "-b:a", settings_dict["audio_bitrate"],
+                "-ac", "2",
+                "-f", "hls",
+                "-hls_time", "10",  # Segment duration
+                "-hls_playlist_type", "vod",
+                "-hls_segment_filename", f"{output_dir}/{base_name}_{quality}_%03d.ts",
+                f"{output_dir}/{base_name}_{quality}.m3u8",
+                "-y"
+            ]
+
+            run_ffmpeg(cmd, timeout_s=300, check=True)
+
+            # Verify files were created
+            playlist_path = f"{output_dir}/{base_name}_{quality}.m3u8"
+            if os.path.exists(playlist_path):
+                return True
+            else:
+                logger.error(f"HLS playlist not created: {playlist_path}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error creating single quality HLS for {quality}: {e}")
+            raise
+
+    @staticmethod
+    def create_hls_stream(input_path: str, output_dir: str, base_name: str, qualities: Optional[List[str]] = None) -> bool:
+        """
+        Create HLS stream with multiple quality variants using sequential processing
+        """
+        try:
+            if qualities is None:
+                qualities = ["480p", "720p", "1080p"]
+
+            # Ensure qualities is a list
+            if not isinstance(qualities, list):
+                qualities = ["480p", "720p", "1080p"]
+
+            quality_settings = {
+                "360p": {"width": 640, "height": 360, "bitrate": "800k", "audio_bitrate": "128k"},
+                "480p": {"width": 854, "height": 480, "bitrate": "1200k", "audio_bitrate": "128k"},
+                "720p": {"width": 1280, "height": 720, "bitrate": "2500k", "audio_bitrate": "128k"},
+                "1080p": {"width": 1920, "height": 1080, "bitrate": "5000k", "audio_bitrate": "128k"},
+            }
+
+            # Create output directory
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Generate unique base name for this streaming session
+            import uuid as uuid_module
+            base_name = f"stream_{uuid_module.uuid4().hex[:8]}"
+
+            # Create each quality variant sequentially
+            successful_qualities = []
+            for quality in qualities:
+                if quality not in quality_settings:
+                    logger.warning(f"Skipping unknown quality: {quality}")
+                    continue
+
+                try:
+                    success = FFmpegService._create_single_quality_hls(
+                        input_path, output_dir, base_name, quality, quality_settings[quality]
+                    )
+                    if success:
+                        successful_qualities.append(quality)
+                        logger.info(f"Successfully created {quality} HLS variant")
+                    else:
+                        logger.error(f"Failed to create {quality} HLS variant")
+                except Exception as e:
+                    logger.error(f"Error creating {quality} variant: {e}")
+                    continue
+
+            if not successful_qualities:
+                raise Exception("Failed to create any HLS quality variants")
+
+            # Create master playlist
+            FFmpegService._create_master_playlist(output_dir, base_name, successful_qualities, quality_settings)
+
+            logger.info(f"Successfully created HLS stream with {len(successful_qualities)} qualities")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error creating HLS stream: {e}")
+            raise
+
+    @staticmethod
+    def _create_single_quality_hls(input_path: str, output_dir: str, base_name: str, quality: str, settings_dict: dict) -> bool:
+        """
+        Create a single quality HLS variant
+        """
+        try:
+            # Calculate appropriate dimensions based on input video aspect ratio
+            input_info = FFmpegService.get_video_info(input_path)
+            if not input_info:
+                raise Exception("Could not get video info")
+
+            input_width = input_info.get('width', 1920)
+            input_height = input_info.get('height', 1080)
+
+            # Calculate target dimensions maintaining aspect ratio
+            target_width = settings_dict['width']
+            target_height = settings_dict['height']
+
+            # For portrait videos, adjust dimensions to maintain aspect ratio
+            if input_width < input_height:  # Portrait video
+                # Scale based on width, maintain aspect ratio
+                scale_factor = target_width / input_width
+                actual_height = int(input_height * scale_factor)
+                scale_filter = f"scale={target_width}:{actual_height}"
+            else:  # Landscape video
+                scale_filter = f"scale={target_width}:{target_height}"
+
+            cmd = [
+                settings.ffmpeg_path,
+                "-i", input_path,
+                "-vf", scale_filter,
+                "-c:v", "libx264",
+                "-b:v", settings_dict["bitrate"],
+                "-maxrate", settings_dict["bitrate"],
+                "-bufsize", f"{int(settings_dict['bitrate'].replace('k', '')) * 2}k",
+                "-preset", "medium",
+                "-g", "48",  # GOP size
+                "-sc_threshold", "0",
+                "-c:a", "aac",
+                "-b:a", settings_dict["audio_bitrate"],
+                "-ac", "2",
+                "-f", "hls",
+                "-hls_time", "10",  # Segment duration
+                "-hls_playlist_type", "vod",
+                "-hls_segment_filename", f"{output_dir}/{base_name}_{quality}_%03d.ts",
+                f"{output_dir}/{base_name}_{quality}.m3u8",
+                "-y"
+            ]
+
+            run_ffmpeg(cmd, timeout_s=300, check=True)
+
+            # Verify files were created
+            playlist_path = f"{output_dir}/{base_name}_{quality}.m3u8"
+            if os.path.exists(playlist_path):
+                return True
+            else:
+                logger.error(f"HLS playlist not created: {playlist_path}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error creating single quality HLS for {quality}: {e}")
+            raise
+
+    @staticmethod
+    def _create_master_playlist(output_dir: str, base_name: str, qualities: list, quality_settings: dict) -> None:
+        """Create HLS master playlist for multi-variant streaming"""
+        master_playlist_path = os.path.join(output_dir, f"{base_name}_master.m3u8")
+
+        with open(master_playlist_path, 'w') as f:
+            f.write("#EXTM3U\n")
+            f.write("#EXT-X-VERSION:3\n")
+
+            for quality in qualities:
+                if quality not in quality_settings:
+                    continue
+
+                settings_dict = quality_settings[quality]
+                bandwidth = int(settings_dict["bitrate"].replace("k", "000").replace("M", "000000"))
+
+                f.write(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},")
+                f.write(f"RESOLUTION={settings_dict['width']}x{settings_dict['height']},")
+                f.write(f"CODECS=\"avc1.640028,mp4a.40.2\"\n")
+                f.write(f"{base_name}_{quality}.m3u8\n")
+
+    @staticmethod
+    def create_speed_variant(input_path: str, output_path: str, speed: float) -> bool:
+        """
+        Create a speed-adjusted variant of the video
+        """
+        try:
+            if not (0.25 <= speed <= 4.0):
+                raise ValueError("Speed must be between 0.25x and 4.0x")
+
+            # Calculate audio pitch correction
+            audio_filter = f"atempo={speed}"
+            if speed != 1.0:
+                # For non-unity speeds, we need to adjust pitch to maintain audio quality
+                pitch_factor = 1.0 / speed
+                audio_filter += f",asetrate=44100*{pitch_factor},aresample=44100"
+
+            cmd = [
+                settings.ffmpeg_path,
+                "-i", input_path,
+                "-filter:v", f"setpts={1/speed}*PTS",  # Adjust video speed
+                "-filter:a", audio_filter,  # Adjust audio speed with pitch correction
+                "-c:v", "libx264",
+                "-preset", "medium",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                output_path,
+                "-y"
+            ]
+
+            run_ffmpeg(cmd, timeout_s=300, check=True)
+            return os.path.exists(output_path)
+        except Exception as e:
+            logger.error(f"Error creating speed variant: {e}")
+            raise
+
+    @staticmethod
+    def generate_thumbnail(input_path: str, output_path: str, timestamp: float = 1.0) -> bool:
+        """
+        Generate a thumbnail from video at specified timestamp
+        """
+        try:
+            cmd = [
+                settings.ffmpeg_path,
+                "-i", input_path,
+                "-ss", str(timestamp),  # Seek to timestamp
+                "-vframes", "1",  # Extract one frame
+                "-q:v", "2",  # Quality setting
+                "-vf", "scale=320:-1",  # Scale to 320px width, maintain aspect ratio
+                output_path,
+                "-y"
+            ]
+
+            run_ffmpeg(cmd, timeout_s=30, check=True)
+            return os.path.exists(output_path)
+        except Exception as e:
+            logger.error(f"Error generating thumbnail: {e}")
             raise

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class VideoService:
     @staticmethod
     def save_upload_file(upload_file: UploadFile) -> Tuple[str, str]:
-        file_extension = os.path.splitext(upload_file.filename)[1]
+        file_extension = os.path.splitext(upload_file.filename or "")[1]
         iso_timestamp = datetime.utcnow().isoformat().replace(":", "-") + "Z"
         unique_filename = f"{iso_timestamp}_{uuid.uuid4()}{file_extension}"
         file_path = os.path.join(settings.upload_dir, unique_filename)
@@ -70,6 +70,10 @@ class VideoService:
         db.add(video)
         db.commit()
         db.refresh(video)
+
+        # Note: Thumbnail generation will be handled by a background task
+        # or can be triggered manually when needed
+
         return video
 
     @staticmethod
@@ -155,7 +159,7 @@ class VideoService:
 
     @staticmethod
     def trim_and_record(db: Session, video: Video, output_path: str, start_time: float, end_time: float) -> bool:
-        success = FFmpegService.trim_video(video.file_path, output_path, start_time, end_time)
+        success = FFmpegService.trim_video(str(video.file_path), output_path, start_time, end_time)
         if not success:
             return False
         VideoService.record_processed_video(
@@ -184,7 +188,7 @@ class VideoService:
     ) -> bool:
         if overlay_type == "text":
             success = FFmpegService.add_text_overlay(
-                video.file_path,
+                str(video.file_path),
                 output_path,
                 text=content,
                 position_x=position_x,
@@ -197,7 +201,7 @@ class VideoService:
             )
         elif overlay_type == "image":
             success = FFmpegService.add_image_overlay(
-                video.file_path,
+                str(video.file_path),
                 output_path,
                 overlay_path=content,
                 position_x=position_x,
@@ -240,7 +244,7 @@ class VideoService:
         opacity: float,
     ) -> bool:
         success = FFmpegService.add_watermark(
-            video.file_path,
+            str(video.file_path),
             output_path,
             watermark_path=watermark_path,
             position=position,
@@ -259,7 +263,7 @@ class VideoService:
 
     @staticmethod
     def quality_and_record(db: Session, video: Video, output_path: str, quality: str) -> bool:
-        success = FFmpegService.convert_quality(video.file_path, output_path, quality)
+        success = FFmpegService.convert_quality(str(video.file_path), output_path, quality)
         if not success:
             return False
         VideoService.record_processed_video(

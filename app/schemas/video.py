@@ -88,3 +88,27 @@ class ProcessedVideoResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class StreamingVariantInfo(BaseModel):
+    id: str
+    quality: str
+    speed: float
+    file_path: str
+    width: Optional[int] = None
+    height: Optional[int] = None
+    bitrate: Optional[str] = None
+    variant_type: str
+
+
+class StreamingInfoResponse(BaseModel):
+    video_id: str
+    streaming_ready: bool
+    master_playlist: Optional[str] = None
+    qualities: List[str]
+    variants: List[StreamingVariantInfo]
+
+
+class SpeedVariantRequest(BaseModel):
+    speed: float = Field(..., ge=0.25, le=4.0, description="Playback speed multiplier")
+    quality: str = Field(default="720p", description="Base quality for speed variant")

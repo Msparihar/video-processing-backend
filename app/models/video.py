@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Float, Text, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -21,8 +21,14 @@ class Video(Base):
     upload_time = Column(DateTime(timezone=True), server_default=func.now())
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
+    # Streaming-related fields
+    streaming_ready = Column(Boolean, default=False)
+    streaming_path = Column(String, nullable=True)  # Path to HLS master playlist
+    streaming_qualities = Column(JSON, nullable=True)  # Available quality variants
+
     processed_videos = relationship("ProcessedVideo", back_populates="original_video")
     jobs = relationship("Job", back_populates="video")
+    streaming_variants = relationship("StreamingVariant", back_populates="video")
 
 
 class ProcessedVideo(Base):
@@ -77,3 +83,24 @@ class Overlay(Base):
     font_color = Column(String, nullable=True)
     language = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class StreamingVariant(Base):
+    __tablename__ = "streaming_variants"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    video_id = Column(String, ForeignKey("videos.id"), nullable=False)
+    quality = Column(String, nullable=False)  # e.g., "480p", "720p", "1080p"
+    speed = Column(Float, default=1.0)  # Playback speed multiplier
+    file_path = Column(String, nullable=False)  # Path to variant file or HLS playlist
+    file_size = Column(Integer, nullable=True)
+    duration = Column(Float, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    bitrate = Column(String, nullable=True)  # Video bitrate
+    audio_bitrate = Column(String, nullable=True)
+    variant_type = Column(String, nullable=False, default="hls")  # "hls", "mp4", "webm"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    video = relationship("Video", back_populates="streaming_variants")
